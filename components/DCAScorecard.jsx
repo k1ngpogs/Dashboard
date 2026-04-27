@@ -1,42 +1,44 @@
 import { useState, useRef } from 'react';
 
 export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading }) {
-  const [fileName, setFileName] = useState('');
-  const [fileBase64, setFileBase64] = useState('');
+  const [files, setFiles] = useState([]); // [{name, base64}]
   const [manualMode, setManualMode] = useState(false);
   const [manualText, setManualText] = useState('');
   const fileInputRef = useRef(null);
 
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (file.type !== 'application/pdf') {
-      alert('Please upload a PDF file.');
-      return;
-    }
-    setFileName(file.name);
-
+  const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result.split(',')[1];
-      setFileBase64(base64);
-    };
+    reader.onload = () => resolve({ name: file.name, base64: reader.result.split(',')[1] });
+    reader.onerror = reject;
     reader.readAsDataURL(file);
+  });
+
+  const handleFileChange = async (e) => {
+    const selected = Array.from(e.target.files).filter(f => f.type === 'application/pdf');
+    if (selected.length === 0) { alert('Please select PDF files only.'); return; }
+    if (selected.length + files.length > 5) { alert('Maximum 5 files (one per year).'); return; }
+    const newFiles = await Promise.all(selected.map(readFileAsBase64));
+    setFiles(prev => [...prev, ...newFiles]);
+    e.target.value = '';
   };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    const dropped = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
+    if (dropped.length + files.length > 5) { alert('Maximum 5 files.'); return; }
+    const newFiles = await Promise.all(dropped.map(readFileAsBase64));
+    setFiles(prev => [...prev, ...newFiles]);
+  };
+
+  const removeFile = (index) => setFiles(prev => prev.filter((_, i) => i !== index));
 
   const handleSubmit = () => {
     if (manualMode) {
-      if (!manualText.trim()) {
-        alert('Please paste some financial data first.');
-        return;
-      }
+      if (!manualText.trim()) { alert('Please paste financial data first.'); return; }
       onRunAnalysis({ type: 'text', data: manualText });
     } else {
-      if (!fileBase64) {
-        alert('Please upload a PDF first.');
-        return;
-      }
-      onRunAnalysis({ type: 'pdf', data: fileBase64 });
+      if (files.length === 0) { alert('Please upload at least one PDF.'); return; }
+      onRunAnalysis({ type: 'pdf', files });
     }
   };
 
@@ -63,9 +65,9 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
         <div className="card">
           <div className="card-header">DCA Scorecard — Upload Financial Statements</div>
           <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 20 }}>
-            Export just the financial statement pages from the 10-K as a PDF (income statement,
-            balance sheet, cash flow — 5 years). On Mac: File → Print → set page range → Save as PDF.
-            Upload that here and the scorecard runs automatically.
+            Upload up to 5 PDFs — one per year, or a single PDF covering multiple years.
+            Export just the financial statement pages from each 10-K (income statement, balance sheet, cash flow).
+            On Mac: open in Preview → File → Print → set page range → Save as PDF.
           </p>
 
           {!manualMode ? (
@@ -74,32 +76,37 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
                 className="upload-area"
                 onClick={() => fileInputRef.current?.click()}
                 onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const file = e.dataTransfer.files[0];
-                  if (file) {
-                    setFileName(file.name);
-                    const reader = new FileReader();
-                    reader.onload = () => setFileBase64(reader.result.split(',')[1]);
-                    reader.readAsDataURL(file);
-                  }
-                }}
+                onDrop={handleDrop}
+                style={{ cursor: 'pointer' }}
               >
-                {fileBase64 ? (
+                {files.length === 0 ? (
                   <>
-                    <p style={{ color: 'var(--pass)', fontSize: 20, marginBottom: 8 }}>✓</p>
-                    <p style={{ color: 'var(--pass)' }}>{fileName}</p>
+                    <p style={{ fontSize: 28, marginBottom: 8 }}>📄</p>
+                    <p>Click to upload PDFs, or drag and drop</p>
                     <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 6 }}>
-                      Ready to analyse — click Run DCA Scorecard below
+                      Up to 5 files · Financial statement pages only
                     </p>
                   </>
                 ) : (
                   <>
-                    <p style={{ fontSize: 28, marginBottom: 8 }}>📄</p>
-                    <p>Click to upload PDF, or drag and drop</p>
-                    <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 6 }}>
-                      Just the financial statement pages — not the full 10-K
+                    <p style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 12 }}>
+                      {files.length}/5 files uploaded · Click to add more
                     </p>
+                    {files.map((f, i) => (
+                      <div key={i} style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        background: 'var(--bg-primary)', borderRadius: 6, padding: '8px 12px',
+                        marginBottom: 6
+                      }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span style={{ color: 'var(--pass)', fontSize: 13 }}>✓ {f.name}</span>
+                        <button
+                          onClick={() => removeFile(i)}
+                          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}
+                        >×</button>
+                      </div>
+                    ))}
                   </>
                 )}
               </div>
@@ -108,6 +115,7 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
                 ref={fileInputRef}
                 type="file"
                 accept=".pdf"
+                multiple
                 style={{ display: 'none' }}
                 onChange={handleFileChange}
               />
@@ -116,16 +124,13 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
                 <button
                   className="btn-primary"
                   onClick={handleSubmit}
-                  disabled={loading || !fileBase64}
+                  disabled={loading || files.length === 0}
                 >
                   {loading ? 'Analysing...' : 'Run DCA Scorecard'}
                 </button>
-                {fileBase64 && (
-                  <button
-                    className="btn-secondary"
-                    onClick={() => { setFileBase64(''); setFileName(''); }}
-                  >
-                    Remove
+                {files.length > 0 && (
+                  <button className="btn-secondary" onClick={() => setFiles([])}>
+                    Clear all
                   </button>
                 )}
                 <button
@@ -140,7 +145,7 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
           ) : (
             <div>
               <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 12 }}>
-                Paste the financial statements directly — income statement, balance sheet, cash flow. 5 years of data.
+                Paste financial statements directly — income statement, balance sheet, cash flow. 5 years of data.
               </p>
               <textarea
                 className="financial-paste"
@@ -168,9 +173,7 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
       {loading && (
         <div className="loading-container">
           <div className="loading-spinner" />
-          <div className="loading-text">
-            Running 22-criteria Buffett analysis on {ticker}...
-          </div>
+          <div className="loading-text">Running 22-criteria Buffett analysis on {ticker}...</div>
         </div>
       )}
 
@@ -186,11 +189,7 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
                   Warren Buffett / Mary Buffett framework · {scorecard.years?.length || 5}-year analysis · $M
                 </p>
               </div>
-              <button
-                className="btn-secondary"
-                onClick={() => onRunAnalysis(null)}
-                style={{ fontSize: 12 }}
-              >
+              <button className="btn-secondary" onClick={() => onRunAnalysis(null)} style={{ fontSize: 12 }}>
                 Re-run
               </button>
             </div>
@@ -255,11 +254,7 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
                           <td className="label">{label}</td>
                           {(values || []).map((v, i) => (
                             <td className="num" key={i}>
-                              {v != null
-                                ? key === 'eps'
-                                  ? '$' + parseFloat(v).toFixed(2)
-                                  : parseFloat(v).toLocaleString()
-                                : '—'}
+                              {v != null ? (key === 'eps' ? '$' + parseFloat(v).toFixed(2) : parseFloat(v).toLocaleString()) : '—'}
                             </td>
                           ))}
                         </tr>
