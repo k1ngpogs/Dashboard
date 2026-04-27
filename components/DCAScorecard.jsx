@@ -1,33 +1,74 @@
 import { useState, useRef } from 'react';
 
 export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading }) {
-  const [files, setFiles] = useState([]); // [{name, base64}]
+  const [files, setFiles] = useState([]);
+  const [extracting, setExtracting] = useState(false);
   const [manualMode, setManualMode] = useState(false);
   const [manualText, setManualText] = useState('');
   const fileInputRef = useRef(null);
 
-  const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve({ name: file.name, base64: reader.result.split(',')[1] });
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+  const loadPDFJS = () => new Promise((resolve, reject) => {
+    if (window.pdfjsLib) { resolve(); return; }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    script.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      resolve();
+    };
+    script.onerror = reject;
+    document.head.appendChild(script);
   });
+
+  const extractTextFromPDF = async (file) => {
+    await loadPDFJS();
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+    let text = `\n=== ${file.name} ===\n`;
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      text += content.items.map(item => item.str).join(' ') + '\n';
+    }
+    return text;
+  };
 
   const handleFileChange = async (e) => {
     const selected = Array.from(e.target.files).filter(f => f.type === 'application/pdf');
-    if (selected.length === 0) { alert('Please select PDF files only.'); return; }
-    if (selected.length + files.length > 5) { alert('Maximum 5 files (one per year).'); return; }
-    const newFiles = await Promise.all(selected.map(readFileAsBase64));
-    setFiles(prev => [...prev, ...newFiles]);
-    e.target.value = '';
+    if (!selected.length) { alert('PDF files only.'); return; }
+    if (selected.length + files.length > 5) { alert('Maximum 5 files.'); return; }
+    setExtracting(true);
+    try {
+      const newFiles = await Promise.all(selected.map(async (f) => ({
+        name: f.name,
+        text: await extractTextFromPDF(f),
+      })));
+      setFiles(prev => [...prev, ...newFiles]);
+    } catch (err) {
+      alert('Error reading PDF: ' + err.message);
+    } finally {
+      setExtracting(false);
+      e.target.value = '';
+    }
   };
 
   const handleDrop = async (e) => {
     e.preventDefault();
     const dropped = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
+    if (!dropped.length) return;
     if (dropped.length + files.length > 5) { alert('Maximum 5 files.'); return; }
-    const newFiles = await Promise.all(dropped.map(readFileAsBase64));
-    setFiles(prev => [...prev, ...newFiles]);
+    setExtracting(true);
+    try {
+      const newFiles = await Promise.all(dropped.map(async (f) => ({
+        name: f.name,
+        text: await extractTextFromPDF(f),
+      })));
+      setFiles(prev => [...prev, ...newFiles]);
+    } catch (err) {
+      alert('Error reading PDF: ' + err.message);
+    } finally {
+      setExtracting(false);
+    }
   };
 
   const removeFile = (index) => setFiles(prev => prev.filter((_, i) => i !== index));
@@ -37,17 +78,13 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
       if (!manualText.trim()) { alert('Please paste financial data first.'); return; }
       onRunAnalysis({ type: 'text', data: manualText });
     } else {
-      if (files.length === 0) { alert('Please upload at least one PDF.'); return; }
-      onRunAnalysis({ type: 'pdf', files });
+      if (!files.length) { alert('Please upload at least one PDF.'); return; }
+      const combined = files.map(f => f.text).join('\n\n');
+      onRunAnalysis({ type: 'text', data: combined });
     }
   };
 
-  const resultIcon = (result) => {
-    if (result === 'pass') return '✅';
-    if (result === 'warn') return '⚠️';
-    if (result === 'fail') return '❌';
-    return '—';
-  };
+  const resultIcon = (r) => r === 'pass' ? '✅' : r === 'warn' ? '⚠️' : r === 'fail' ? '❌' : '—';
 
   const groupCriteria = (criteria) => {
     const groups = {};
@@ -65,21 +102,25 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
         <div className="card">
           <div className="card-header">DCA Scorecard — Upload Financial Statements</div>
           <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 20 }}>
-            Upload up to 5 PDFs — one per year, or a single PDF covering multiple years.
-            Export just the financial statement pages from each 10-K (income statement, balance sheet, cash flow).
-            On Mac: open in Preview → File → Print → set page range → Save as PDF.
+            Upload up to 5 PDFs — one per year. Export just the financial statement pages from each 10-K
+            (income statement, balance sheet, cash flow). On Mac: open in Preview → File → Print → set page range → Save as PDF.
           </p>
 
           {!manualMode ? (
             <div>
               <div
                 className="upload-area"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => !extracting && fileInputRef.current?.click()}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={handleDrop}
-                style={{ cursor: 'pointer' }}
+                style={{ cursor: extracting ? 'wait' : 'pointer' }}
               >
-                {files.length === 0 ? (
+                {extracting ? (
+                  <>
+                    <div className="loading-spinner" style={{ margin: '0 auto 12px' }} />
+                    <p>Extracting text from PDF...</p>
+                  </>
+                ) : files.length === 0 ? (
                   <>
                     <p style={{ fontSize: 28, marginBottom: 8 }}>📄</p>
                     <p>Click to upload PDFs, or drag and drop</p>
@@ -90,54 +131,37 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
                 ) : (
                   <>
                     <p style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 12 }}>
-                      {files.length}/5 files uploaded · Click to add more
+                      {files.length}/5 files ready · Click to add more
                     </p>
                     {files.map((f, i) => (
                       <div key={i} style={{
                         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        background: 'var(--bg-primary)', borderRadius: 6, padding: '8px 12px',
-                        marginBottom: 6
-                      }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
+                        background: 'var(--bg-primary)', borderRadius: 6, padding: '8px 12px', marginBottom: 6
+                      }} onClick={(e) => e.stopPropagation()}>
                         <span style={{ color: 'var(--pass)', fontSize: 13 }}>✓ {f.name}</span>
-                        <button
-                          onClick={() => removeFile(i)}
-                          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}
-                        >×</button>
+                        <button onClick={() => removeFile(i)}
+                          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>
+                          ×
+                        </button>
                       </div>
                     ))}
                   </>
                 )}
               </div>
 
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf"
-                multiple
-                style={{ display: 'none' }}
-                onChange={handleFileChange}
-              />
+              <input ref={fileInputRef} type="file" accept=".pdf" multiple
+                style={{ display: 'none' }} onChange={handleFileChange} />
 
               <div style={{ display: 'flex', gap: 12, marginTop: 16, alignItems: 'center' }}>
-                <button
-                  className="btn-primary"
-                  onClick={handleSubmit}
-                  disabled={loading || files.length === 0}
-                >
+                <button className="btn-primary" onClick={handleSubmit}
+                  disabled={loading || extracting || !files.length}>
                   {loading ? 'Analysing...' : 'Run DCA Scorecard'}
                 </button>
                 {files.length > 0 && (
-                  <button className="btn-secondary" onClick={() => setFiles([])}>
-                    Clear all
-                  </button>
+                  <button className="btn-secondary" onClick={() => setFiles([])}>Clear all</button>
                 )}
-                <button
-                  className="btn-secondary"
-                  onClick={() => setManualMode(true)}
-                  style={{ marginLeft: 'auto', fontSize: 12 }}
-                >
+                <button className="btn-secondary" onClick={() => setManualMode(true)}
+                  style={{ marginLeft: 'auto', fontSize: 12 }}>
                   Paste text instead
                 </button>
               </div>
@@ -145,20 +169,14 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
           ) : (
             <div>
               <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 12 }}>
-                Paste financial statements directly — income statement, balance sheet, cash flow. 5 years of data.
+                Paste financial statements — income statement, balance sheet, cash flow. 5 years of data.
               </p>
-              <textarea
-                className="financial-paste"
-                value={manualText}
+              <textarea className="financial-paste" value={manualText}
                 onChange={(e) => setManualText(e.target.value)}
-                placeholder="Paste financial data here..."
-              />
+                placeholder="Paste financial data here..." />
               <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
-                <button
-                  className="btn-primary"
-                  onClick={handleSubmit}
-                  disabled={loading || !manualText.trim()}
-                >
+                <button className="btn-primary" onClick={handleSubmit}
+                  disabled={loading || !manualText.trim()}>
                   {loading ? 'Analysing...' : 'Run DCA Scorecard'}
                 </button>
                 <button className="btn-secondary" onClick={() => setManualMode(false)}>
@@ -234,21 +252,14 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
                   <thead>
                     <tr>
                       <th>Metric</th>
-                      {(scorecard.years || []).map((y) => (
-                        <th className="num" key={y}>{y}</th>
-                      ))}
+                      {(scorecard.years || []).map((y) => <th className="num" key={y}>{y}</th>)}
                     </tr>
                   </thead>
                   <tbody>
                     {Object.entries(scorecard.raw_financials).map(([key, values]) => {
-                      const label = key
-                        .replace(/_/g, ' ')
-                        .replace(/\b\w/g, (c) => c.toUpperCase())
-                        .replace('Dna', 'D&A')
-                        .replace('Lt Debt', 'LT Debt')
-                        .replace('St Debt', 'ST Debt')
-                        .replace('Operating Cf', 'Operating CF')
-                        .replace('Eps', 'EPS');
+                      const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+                        .replace('Dna', 'D&A').replace('Lt Debt', 'LT Debt').replace('St Debt', 'ST Debt')
+                        .replace('Operating Cf', 'Operating CF').replace('Eps', 'EPS');
                       return (
                         <tr key={key}>
                           <td className="label">{label}</td>
