@@ -2,16 +2,15 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { ticker, financialData } = req.body;
-  if (!ticker || !financialData) {
-    return res.status(400).json({ error: 'Ticker and financial data required' });
-  }
+  if (!ticker || !financialData) return res.status(400).json({ error: 'Ticker and financial data required' });
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
 
   const scorecardInstructions = `Run the full 22-criteria DCA scorecard using the Warren Buffett / Mary Buffett framework from "Interpreting Financial Statements."
 
-Return a JSON object with this exact structure:
+Extract all financial data from the documents provided and return ONLY a JSON object — start with { end with }, no markdown, no code fences, nothing before or after.
+
 {
   "company": "Company Name",
   "ticker": "${ticker}",
@@ -76,30 +75,25 @@ The 22 criteria:
 19. Operating CF consistency — pass = always positive, warn = mostly, fail = negative years [CASH GENERATION QUALITY]
 20. ROIC % (NOPAT / invested capital) — pass ≥20%, warn ≥15%, fail <15% [CASH GENERATION QUALITY]
 21. FCF margin % ((OpCF - CapEx) / Revenue) — pass ≥25%, warn ≥15%, fail <15% [CASH GENERATION QUALITY]
-22. Owner's earnings trend (NI + D&A - 50% CapEx) — pass = growing, warn = mixed, fail = declining [CASH GENERATION QUALITY]
+22. Owner's earnings trend (NI + D&A - 50% CapEx) — pass = growing, warn = mixed, fail = declining [CASH GENERATION QUALITY]`;
 
-IMPORTANT: Return ONLY the JSON object. No markdown, no code fences, no preamble.`;
-
-  // Build message content based on input type
-  let messageContent;
+  // Build message content
+  let messageContent = [];
 
   if (financialData.type === 'pdf') {
-    messageContent = [
-      {
+    const fileList = financialData.files || (financialData.data ? [{ base64: financialData.data, name: 'document.pdf' }] : []);
+    fileList.forEach((file, i) => {
+      messageContent.push({
         type: 'document',
-        source: {
-          type: 'base64',
-          media_type: 'application/pdf',
-          data: financialData.data,
-        },
-      },
-      {
-        type: 'text',
-        text: `The PDF above contains financial statements for ${ticker}. Extract all financial data from the statements and then:\n\n${scorecardInstructions}`,
-      },
-    ];
+        source: { type: 'base64', media_type: 'application/pdf', data: file.base64 },
+      });
+    });
+    messageContent.push({
+      type: 'text',
+      text: `The ${fileList.length} PDF(s) above contain financial statements for ${ticker}. Extract all financial data across all documents and then:\n\n${scorecardInstructions}`,
+    });
   } else {
-    messageContent = `The following is financial statement data for ${ticker}:\n\n${financialData.data}\n\n${scorecardInstructions}`;
+    messageContent = `Financial statement data for ${ticker}:\n\n${financialData.data}\n\n${scorecardInstructions}`;
   }
 
   try {
@@ -126,11 +120,16 @@ IMPORTANT: Return ONLY the JSON object. No markdown, no code fences, no preamble
     const data = await response.json();
     const textBlocks = data.content.filter((b) => b.type === 'text');
     const fullText = textBlocks.map((b) => b.text).join('');
-    const cleaned = fullText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+    const jsonStart = fullText.indexOf('{');
+    const jsonEnd = fullText.lastIndexOf('}');
+    if (jsonStart === -1 || jsonEnd === -1) {
+      return res.status(200).json({ raw: fullText, parseError: true });
+    }
 
     let scorecard;
     try {
-      scorecard = JSON.parse(cleaned);
+      scorecard = JSON.parse(fullText.slice(jsonStart, jsonEnd + 1));
     } catch {
       return res.status(200).json({ raw: fullText, parseError: true });
     }
