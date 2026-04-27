@@ -25,9 +25,9 @@ export default function Home() {
   const [dcaScorecard, setDcaScorecard] = useState(null);
   const [dcaLoading, setDcaLoading] = useState(false);
 
+  // In-memory cache — persists for the entire browser session
   const [cache, setCache] = useState({});
 
-  // On mount: load saved ticker list from KV — same for both users
   useEffect(() => {
     async function loadTickers() {
       try {
@@ -64,17 +64,46 @@ export default function Home() {
     }
   };
 
-  const runQualitativeAnalysis = useCallback(async (symbol) => {
-    if (cache[symbol]?.qualitative) {
+  const loadTicker = useCallback(async (symbol, forceRerun = false) => {
+    // Always check in-memory cache first — zero cost, instant
+    if (!forceRerun && cache[symbol]?.qualitative) {
+      setActiveTicker(symbol);
+      setTicker(symbol);
       setQualAnalysis(cache[symbol].qualitative);
       setQualSavedAt(cache[symbol].qualSavedAt || null);
+      setDcaScorecard(cache[symbol].dca || null);
+      setQualError(null);
       return;
     }
 
-    setQualLoading(true);
-    setQualError(null);
+    // Then check KV — also free
+    if (!forceRerun) {
+      const saved = await loadFromKV(symbol);
+      if (saved?.qualitative?.data) {
+        const cachedData = {
+          qualitative: saved.qualitative.data,
+          qualSavedAt: saved.qualitative.savedAt,
+          dca: saved.dca?.data || null,
+        };
+        setCache(prev => ({ ...prev, [symbol]: cachedData }));
+        setActiveTicker(symbol);
+        setTicker(symbol);
+        setQualAnalysis(saved.qualitative.data);
+        setQualSavedAt(saved.qualitative.savedAt);
+        setDcaScorecard(saved.dca?.data || null);
+        setQualError(null);
+        return;
+      }
+    }
+
+    // Nothing cached — run fresh analysis
+    setActiveTicker(symbol);
+    setTicker(symbol);
     setQualAnalysis(null);
+    setDcaScorecard(null);
     setQualSavedAt(null);
+    setQualError(null);
+    setQualLoading(true);
 
     try {
       const res = await fetch('/api/qualitative', {
@@ -93,7 +122,7 @@ export default function Home() {
       setQualSavedAt(savedAt);
       await saveToKV(symbol, 'qualitative', result);
 
-      setCache((prev) => ({
+      setCache(prev => ({
         ...prev,
         [symbol]: { ...prev[symbol], qualitative: result, qualSavedAt: savedAt },
       }));
@@ -123,7 +152,7 @@ export default function Home() {
 
       if (result) {
         await saveToKV(activeTicker, 'dca', result);
-        setCache((prev) => ({
+        setCache(prev => ({
           ...prev,
           [activeTicker]: { ...prev[activeTicker], dca: result },
         }));
@@ -138,73 +167,14 @@ export default function Home() {
   const handleAnalyze = async () => {
     const symbol = ticker.trim().toUpperCase();
     if (!symbol) return;
-
-    setActiveTicker(symbol);
-    setQualAnalysis(null);
-    setDcaScorecard(null);
-    setQualSavedAt(null);
-
     if (!savedTickers.includes(symbol)) {
-      setSavedTickers((prev) => [symbol, ...prev]);
+      setSavedTickers(prev => [symbol, ...prev]);
     }
-
-    if (cache[symbol]?.qualitative) {
-      setQualAnalysis(cache[symbol].qualitative);
-      setQualSavedAt(cache[symbol].qualSavedAt || null);
-      if (cache[symbol].dca) setDcaScorecard(cache[symbol].dca);
-      return;
-    }
-
-    // Check KV — brother may have already run this
-    const saved = await loadFromKV(symbol);
-    if (saved?.qualitative?.data) {
-      setQualAnalysis(saved.qualitative.data);
-      setQualSavedAt(saved.qualitative.savedAt);
-      if (saved.dca?.data) setDcaScorecard(saved.dca.data);
-      setCache((prev) => ({
-        ...prev,
-        [symbol]: {
-          qualitative: saved.qualitative.data,
-          qualSavedAt: saved.qualitative.savedAt,
-          dca: saved.dca?.data || null,
-        },
-      }));
-      return;
-    }
-
-    await runQualitativeAnalysis(symbol);
+    await loadTicker(symbol);
   };
 
   const handleSavedClick = async (symbol) => {
-    setTicker(symbol);
-    setActiveTicker(symbol);
-    setQualAnalysis(null);
-    setDcaScorecard(null);
-    setQualSavedAt(null);
-
-    if (cache[symbol]?.qualitative) {
-      setQualAnalysis(cache[symbol].qualitative);
-      setQualSavedAt(cache[symbol].qualSavedAt || null);
-      if (cache[symbol].dca) setDcaScorecard(cache[symbol].dca);
-      return;
-    }
-
-    const saved = await loadFromKV(symbol);
-    if (saved?.qualitative?.data) {
-      setQualAnalysis(saved.qualitative.data);
-      setQualSavedAt(saved.qualitative.savedAt);
-      if (saved.dca?.data) setDcaScorecard(saved.dca.data);
-      setCache((prev) => ({
-        ...prev,
-        [symbol]: {
-          qualitative: saved.qualitative.data,
-          qualSavedAt: saved.qualitative.savedAt,
-          dca: saved.dca?.data || null,
-        },
-      }));
-    } else {
-      await runQualitativeAnalysis(symbol);
-    }
+    await loadTicker(symbol);
   };
 
   const handleKeyDown = (e) => {
@@ -248,6 +218,15 @@ export default function Home() {
         >
           {qualLoading ? 'Analysing...' : 'Analyse'}
         </button>
+        {activeTicker && !qualLoading && (
+          <button
+            className="btn-secondary"
+            onClick={() => loadTicker(activeTicker, true)}
+            title="Force re-run (costs tokens)"
+          >
+            ↻ Refresh
+          </button>
+        )}
       </div>
 
       {activeTicker && (
