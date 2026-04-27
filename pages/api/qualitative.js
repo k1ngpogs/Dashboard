@@ -53,14 +53,15 @@ After searching, return ONLY a JSON object — nothing before it, nothing after 
     const fullText = textBlocks.map((b) => b.text).join('');
 
     // Find JSON object in the response
-    const jsonStart = fullText.indexOf('{');
-    const jsonEnd = fullText.lastIndexOf('}');
+    const cleaned2 = fullText.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+    const jsonStart = cleaned2.indexOf('{');
+    const jsonEnd = cleaned2.lastIndexOf('}');
 
     if (jsonStart === -1 || jsonEnd === -1) {
       return res.status(200).json({ raw: fullText, parseError: true });
     }
 
-    const jsonString = fullText.slice(jsonStart, jsonEnd + 1);
+    const jsonString = cleaned2.slice(jsonStart, jsonEnd + 1);
 
     let analysis;
     try {
