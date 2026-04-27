@@ -1,14 +1,43 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 
 export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading }) {
-  const [financialData, setFinancialData] = useState('');
+  const [fileName, setFileName] = useState('');
+  const [fileBase64, setFileBase64] = useState('');
+  const [manualMode, setManualMode] = useState(false);
+  const [manualText, setManualText] = useState('');
+  const fileInputRef = useRef(null);
 
-  const handleSubmit = () => {
-    if (!financialData.trim()) {
-      alert('Please paste the financial statement data first.');
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.type !== 'application/pdf') {
+      alert('Please upload a PDF file.');
       return;
     }
-    onRunAnalysis(financialData);
+    setFileName(file.name);
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result.split(',')[1];
+      setFileBase64(base64);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSubmit = () => {
+    if (manualMode) {
+      if (!manualText.trim()) {
+        alert('Please paste some financial data first.');
+        return;
+      }
+      onRunAnalysis({ type: 'text', data: manualText });
+    } else {
+      if (!fileBase64) {
+        alert('Please upload a PDF first.');
+        return;
+      }
+      onRunAnalysis({ type: 'pdf', data: fileBase64 });
+    }
   };
 
   const resultIcon = (result) => {
@@ -18,7 +47,6 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
     return '—';
   };
 
-  // Group criteria by category
   const groupCriteria = (criteria) => {
     const groups = {};
     criteria.forEach((c) => {
@@ -31,35 +59,112 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
 
   return (
     <div>
-      {/* Input Area */}
       {!scorecard && (
         <div className="card">
-          <div className="card-header">DCA Scorecard — Paste Financial Statements</div>
-          <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
-            Paste the income statement, balance sheet, and cash flow statement from the company's 10-K filing.
-            5 years of data is ideal. Copy directly from the SEC filing — tables, numbers, all of it.
+          <div className="card-header">DCA Scorecard — Upload Financial Statements</div>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 20 }}>
+            Export just the financial statement pages from the 10-K as a PDF (income statement,
+            balance sheet, cash flow — 5 years). On Mac: File → Print → set page range → Save as PDF.
+            Upload that here and the scorecard runs automatically.
           </p>
 
-          <textarea
-            className="financial-paste"
-            value={financialData}
-            onChange={(e) => setFinancialData(e.target.value)}
-            placeholder={`Paste financial statements here. Example format:\n\nConsolidated Statements of Income (in millions)\n                          2024      2023      2022      2021      2020\nRevenue                 164,501   134,902   116,609   117,929    85,965\nCost of revenue          30,161    25,959    25,249    22,649    16,692\nGross profit           134,340   108,943    91,360    95,280    69,273\n...`}
-          />
+          {!manualMode ? (
+            <div>
+              <div
+                className="upload-area"
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const file = e.dataTransfer.files[0];
+                  if (file) {
+                    setFileName(file.name);
+                    const reader = new FileReader();
+                    reader.onload = () => setFileBase64(reader.result.split(',')[1]);
+                    reader.readAsDataURL(file);
+                  }
+                }}
+              >
+                {fileBase64 ? (
+                  <>
+                    <p style={{ color: 'var(--pass)', fontSize: 20, marginBottom: 8 }}>✓</p>
+                    <p style={{ color: 'var(--pass)' }}>{fileName}</p>
+                    <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 6 }}>
+                      Ready to analyse — click Run DCA Scorecard below
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p style={{ fontSize: 28, marginBottom: 8 }}>📄</p>
+                    <p>Click to upload PDF, or drag and drop</p>
+                    <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 6 }}>
+                      Just the financial statement pages — not the full 10-K
+                    </p>
+                  </>
+                )}
+              </div>
 
-          <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
-            <button
-              className="btn-primary"
-              onClick={handleSubmit}
-              disabled={loading || !financialData.trim()}
-            >
-              {loading ? 'Analysing...' : 'Run DCA Scorecard'}
-            </button>
-          </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf"
+                style={{ display: 'none' }}
+                onChange={handleFileChange}
+              />
+
+              <div style={{ display: 'flex', gap: 12, marginTop: 16, alignItems: 'center' }}>
+                <button
+                  className="btn-primary"
+                  onClick={handleSubmit}
+                  disabled={loading || !fileBase64}
+                >
+                  {loading ? 'Analysing...' : 'Run DCA Scorecard'}
+                </button>
+                {fileBase64 && (
+                  <button
+                    className="btn-secondary"
+                    onClick={() => { setFileBase64(''); setFileName(''); }}
+                  >
+                    Remove
+                  </button>
+                )}
+                <button
+                  className="btn-secondary"
+                  onClick={() => setManualMode(true)}
+                  style={{ marginLeft: 'auto', fontSize: 12 }}
+                >
+                  Paste text instead
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 12 }}>
+                Paste the financial statements directly — income statement, balance sheet, cash flow. 5 years of data.
+              </p>
+              <textarea
+                className="financial-paste"
+                value={manualText}
+                onChange={(e) => setManualText(e.target.value)}
+                placeholder="Paste financial data here..."
+              />
+              <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+                <button
+                  className="btn-primary"
+                  onClick={handleSubmit}
+                  disabled={loading || !manualText.trim()}
+                >
+                  {loading ? 'Analysing...' : 'Run DCA Scorecard'}
+                </button>
+                <button className="btn-secondary" onClick={() => setManualMode(false)}>
+                  Back to PDF upload
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Loading */}
       {loading && (
         <div className="loading-container">
           <div className="loading-spinner" />
@@ -69,10 +174,8 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
         </div>
       )}
 
-      {/* Results */}
       {scorecard && !loading && (
         <div>
-          {/* Summary Header */}
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
               <div>
@@ -85,14 +188,13 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
               </div>
               <button
                 className="btn-secondary"
-                onClick={() => { onRunAnalysis(null); }}
+                onClick={() => onRunAnalysis(null)}
                 style={{ fontSize: 12 }}
               >
                 Re-run
               </button>
             </div>
 
-            {/* Score pills */}
             <div className="score-summary">
               <div className="score-pill pass-pill">
                 <div className="number">{scorecard.summary?.pass_count || 0}</div>
@@ -108,7 +210,6 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
               </div>
             </div>
 
-            {/* Verdict */}
             <div className="verdict-box">
               <div style={{ fontSize: 14, color: 'var(--accent)', fontWeight: 600, marginBottom: 8 }}>
                 Overall verdict: {scorecard.summary?.verdict || '—'}
@@ -126,7 +227,6 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
             </div>
           </div>
 
-          {/* Raw Financials Table */}
           {scorecard.raw_financials && (
             <div className="card">
               <div className="card-header">Raw Financials ($M)</div>
@@ -150,7 +250,6 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
                         .replace('St Debt', 'ST Debt')
                         .replace('Operating Cf', 'Operating CF')
                         .replace('Eps', 'EPS');
-
                       return (
                         <tr key={key}>
                           <td className="label">{label}</td>
@@ -172,7 +271,6 @@ export default function DCAScorecard({ ticker, scorecard, onRunAnalysis, loading
             </div>
           )}
 
-          {/* Criteria Breakdown */}
           <div className="card">
             <div className="card-header">22 Criteria Breakdown</div>
             {scorecard.criteria && (() => {
