@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react';
 
 export default function RelativeValuation({ ticker }) {
-  const [ratios, setRatios] = useState(null);
-  const [ttmRatios, setTtmRatios] = useState(null);
-  const [peers, setPeers] = useState(null);
-  const [peerRatios, setPeerRatios] = useState({});
+  const [overview, setOverview] = useState(null);
+  const [earnings, setEarnings] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -14,44 +12,19 @@ export default function RelativeValuation({ ticker }) {
     setError(null);
 
     try {
-      // Fetch all data in parallel
-      const [ratiosRes, ttmRes, peersRes, quoteRes] = await Promise.all([
-        fetch(`/api/fmp?endpoint=ratios&symbol=${ticker}&limit=10`),
-        fetch(`/api/fmp?endpoint=key-metrics-ttm&symbol=${ticker}`),
-        fetch(`/api/fmp?endpoint=stock_peers&symbol=${ticker}`),
-        fetch(`/api/fmp?endpoint=quote&symbol=${ticker}`),
+      const [overviewRes, earningsRes] = await Promise.all([
+        fetch(`/api/av?function=OVERVIEW&symbol=${ticker}`),
+        fetch(`/api/av?function=EARNINGS&symbol=${ticker}`),
       ]);
 
-      const ratiosData = await ratiosRes.json();
-      const ttmData = await ttmRes.json();
-      const peersData = await peersRes.json();
-      const quoteData = await quoteRes.json();
+      const overviewData = await overviewRes.json();
+      const earningsData = await earningsRes.json();
 
-      if (ratiosData.error) throw new Error(ratiosData.error);
+      if (overviewData.error) throw new Error(overviewData.error);
+      if (!overviewData.Symbol) throw new Error('No data returned. Check your AV_API_KEY in Vercel environment variables.');
 
-      setRatios(Array.isArray(ratiosData) ? ratiosData : []);
-      setTtmRatios(Array.isArray(ttmData) ? ttmData[0] : ttmData);
-
-      // Get peer tickers
-      const peerList = peersData?.[0]?.peersList || [];
-      setPeers(peerList.slice(0, 4));
-
-      // Fetch peer ratios
-      if (peerList.length > 0) {
-        const peerPromises = peerList.slice(0, 4).map(async (p) => {
-          const res = await fetch(`/api/fmp?endpoint=ratios-ttm&symbol=${p}`);
-          const data = await res.json();
-          const qRes = await fetch(`/api/fmp?endpoint=quote&symbol=${p}`);
-          const qData = await qRes.json();
-          return { ticker: p, ratios: Array.isArray(data) ? data[0] : data, quote: Array.isArray(qData) ? qData[0] : qData };
-        });
-        const peerResults = await Promise.all(peerPromises);
-        const peerMap = {};
-        peerResults.forEach((pr) => {
-          peerMap[pr.ticker] = { ...pr.ratios, ...pr.quote };
-        });
-        setPeerRatios(peerMap);
-      }
+      setOverview(overviewData);
+      setEarnings(earningsData);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -63,161 +36,176 @@ export default function RelativeValuation({ ticker }) {
     fetchData();
   }, [ticker]);
 
-  if (!ticker) {
-    return (
-      <div className="empty-state">
-        <h2>No ticker selected</h2>
-        <p>Enter a ticker symbol above to see relative valuation data</p>
-      </div>
-    );
-  }
+  if (!ticker) return (
+    <div className="empty-state">
+      <h2>No ticker selected</h2>
+      <p>Enter a ticker symbol above to see relative valuation data</p>
+    </div>
+  );
 
-  if (loading) {
-    return (
-      <div className="loading-container">
-        <div className="loading-spinner" />
-        <div className="loading-text">Fetching valuation data for {ticker}...</div>
-      </div>
-    );
-  }
+  if (loading) return (
+    <div className="loading-container">
+      <div className="loading-spinner" />
+      <div className="loading-text">Fetching valuation data for {ticker}...</div>
+    </div>
+  );
 
-  if (error) {
-    return (
-      <div className="card">
-        <p style={{ color: 'var(--fail)' }}>Error loading FMP data: {error}</p>
-        <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 8 }}>
-          Make sure your FMP_API_KEY is set in Vercel environment variables.
-        </p>
-      </div>
-    );
-  }
+  if (error) return (
+    <div className="card">
+      <p style={{ color: 'var(--fail)' }}>Error: {error}</p>
+      <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 8 }}>
+        Make sure AV_API_KEY is set in Vercel environment variables and redeployed.
+      </p>
+      <button className="btn-secondary" onClick={fetchData} style={{ marginTop: 12 }}>
+        Retry
+      </button>
+    </div>
+  );
 
-  if (!ratios || ratios.length === 0) return null;
+  if (!overview) return null;
 
-  // Define which ratios to display
-  const ratioConfig = [
-    { key: 'peRatioTTM', historicalKey: 'priceEarningsRatio', label: 'P/E', decimals: 1 },
-    { key: 'enterpriseValueOverEBITDATTM', historicalKey: 'enterpriseValueOverEBITDA', label: 'EV/EBITDA', decimals: 1 },
-    { key: 'priceToFreeCashFlowsRatioTTM', historicalKey: 'priceToFreeCashFlowsRatio', label: 'P/FCF', decimals: 1 },
-    { key: 'priceToSalesRatioTTM', historicalKey: 'priceToSalesRatio', label: 'P/S', decimals: 1 },
-    { key: 'priceToBookRatioTTM', historicalKey: 'priceToBookRatio', label: 'P/B', decimals: 1 },
-    { key: 'evToSalesTTM', historicalKey: null, label: 'EV/Revenue', decimals: 1 },
-    { key: 'freeCashFlowYieldTTM', historicalKey: null, label: 'FCF Yield', decimals: 1, pct: true },
-    { key: 'dividendYieldTTM', historicalKey: 'dividendYield', label: 'Div Yield', decimals: 2, pct: true },
+  const fmt = (v, decimals = 1, suffix = 'x') => {
+    const n = parseFloat(v);
+    if (!v || isNaN(n) || v === 'None' || v === '-') return '—';
+    return n.toFixed(decimals) + suffix;
+  };
+
+  const fmtB = (v) => {
+    const n = parseFloat(v);
+    if (!v || isNaN(n) || v === 'None') return '—';
+    if (n >= 1e12) return '$' + (n / 1e12).toFixed(2) + 'T';
+    if (n >= 1e9) return '$' + (n / 1e9).toFixed(1) + 'B';
+    if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
+    return '$' + n.toFixed(0);
+  };
+
+  const fmtPct = (v) => {
+    const n = parseFloat(v);
+    if (!v || isNaN(n) || v === 'None') return '—';
+    return (n * 100).toFixed(1) + '%';
+  };
+
+  // Key ratios from overview
+  const currentRatios = [
+    { label: 'P/E (TTM)', value: fmt(overview.TrailingPE) },
+    { label: 'Forward P/E', value: fmt(overview.ForwardPE) },
+    { label: 'P/S', value: fmt(overview.PriceToSalesRatioTTM) },
+    { label: 'P/B', value: fmt(overview.PriceToBookRatio) },
+    { label: 'EV/EBITDA', value: fmt(overview.EVToEBITDA) },
+    { label: 'EV/Revenue', value: fmt(overview.EVToRevenue) },
+    { label: 'PEG Ratio', value: fmt(overview.PEGRatio) },
+    { label: 'Div Yield', value: fmtPct(overview.DividendYield) },
   ];
 
-  const getAverage = (arr) => {
-    const valid = arr.filter((v) => v != null && !isNaN(v) && isFinite(v) && v > 0);
-    return valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
-  };
+  // Profitability metrics
+  const profitMetrics = [
+    { label: 'Gross Margin', value: fmtPct(overview.GrossProfitTTM && overview.RevenueTTM ? overview.GrossProfitTTM / overview.RevenueTTM : null) },
+    { label: 'Profit Margin', value: fmtPct(overview.ProfitMargin) },
+    { label: 'Operating Margin', value: fmtPct(overview.OperatingMarginTTM) },
+    { label: 'ROE', value: fmtPct(overview.ReturnOnEquityTTM) },
+    { label: 'ROA', value: fmtPct(overview.ReturnOnAssetsTTM) },
+    { label: 'Revenue (TTM)', value: fmtB(overview.RevenueTTM) },
+    { label: 'EPS (TTM)', value: fmt(overview.EPS, 2, '') ? '$' + fmt(overview.EPS, 2, '') : '—' },
+    { label: 'Market Cap', value: fmtB(overview.MarketCapitalization) },
+  ];
 
-  const getSignalClass = (current, avg) => {
-    if (!current || !avg) return 'signal-fair';
-    const ratio = current / avg;
-    if (ratio < 0.85) return 'signal-cheap';
-    if (ratio > 1.15) return 'signal-expensive';
-    return 'signal-fair';
-  };
-
-  const formatVal = (v, decimals, pct) => {
-    if (v == null || isNaN(v) || !isFinite(v)) return '—';
-    if (pct) return (v * 100).toFixed(decimals) + '%';
-    return v.toFixed(decimals) + 'x';
-  };
+  // Historical P/E from earnings data
+  const annualEarnings = earnings?.annualEarnings?.slice(0, 8) || [];
 
   return (
     <div>
-      {/* Historical Valuation */}
+      {/* Company overview strip */}
       <div className="card">
-        <div className="card-header">Historical Valuation — {ticker}</div>
-        <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 20 }}>
-          Current multiples vs 5-year and 10-year averages. Green = below average (potentially cheap). Red = above average (potentially expensive).
+        <div className="card-header">{overview.Name} ({ticker})</div>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.6 }}>
+          {overview.Description?.slice(0, 300)}{overview.Description?.length > 300 ? '...' : ''}
         </p>
-
-        <div className="ratio-grid">
-          {ratioConfig.map((rc) => {
-            const current = ttmRatios?.[rc.key];
-            const historicalValues = rc.historicalKey
-              ? ratios.map((r) => r[rc.historicalKey]).filter((v) => v != null && isFinite(v) && v > 0)
-              : [];
-            const avg5 = getAverage(historicalValues.slice(0, 5));
-            const avg10 = getAverage(historicalValues.slice(0, 10));
-
-            return (
-              <div className="ratio-card" key={rc.key}>
-                <div className="ratio-name">{rc.label}</div>
-                <div className={`ratio-current ${getSignalClass(rc.pct ? current : current, avg5)}`}>
-                  {formatVal(current, rc.decimals, rc.pct)}
-                </div>
-                <div className="ratio-row">
-                  <span>5yr avg</span>
-                  <span className="val">{avg5 ? formatVal(avg5, rc.decimals, rc.pct) : '—'}</span>
-                </div>
-                <div className="ratio-row">
-                  <span>10yr avg</span>
-                  <span className="val">{avg10 ? formatVal(avg10, rc.decimals, rc.pct) : '—'}</span>
-                </div>
-                {historicalValues.length > 0 && avg5 && current && (
-                  <div className="ratio-row" style={{ marginTop: 4, borderTop: '1px solid var(--border-light)', paddingTop: 6 }}>
-                    <span>vs 5yr</span>
-                    <span className={`val ${getSignalClass(current, avg5)}`}>
-                      {(((current - avg5) / avg5) * 100).toFixed(0)}%
-                    </span>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+        <div style={{ display: 'flex', gap: 24, marginTop: 16, flexWrap: 'wrap' }}>
+          <div><span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Sector</span><div style={{ fontSize: 14, marginTop: 2 }}>{overview.Sector || '—'}</div></div>
+          <div><span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Industry</span><div style={{ fontSize: 14, marginTop: 2 }}>{overview.Industry || '—'}</div></div>
+          <div><span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Exchange</span><div style={{ fontSize: 14, marginTop: 2 }}>{overview.Exchange || '—'}</div></div>
+          <div><span style={{ color: 'var(--text-muted)', fontSize: 12 }}>52W High</span><div style={{ fontSize: 14, marginTop: 2 }}>${overview['52WeekHigh'] || '—'}</div></div>
+          <div><span style={{ color: 'var(--text-muted)', fontSize: 12 }}>52W Low</span><div style={{ fontSize: 14, marginTop: 2 }}>${overview['52WeekLow'] || '—'}</div></div>
+          <div><span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Analyst Target</span><div style={{ fontSize: 14, marginTop: 2 }}>${overview.AnalystTargetPrice || '—'}</div></div>
         </div>
       </div>
 
-      {/* Peer Comparison */}
-      {peers && peers.length > 0 && (
-        <div className="card">
-          <div className="card-header">Peer Comparison</div>
-          <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 20 }}>
-            {ticker} vs comparable companies on key valuation multiples.
-          </p>
+      {/* Current valuation multiples */}
+      <div className="card">
+        <div className="card-header">Current Valuation Multiples</div>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 20 }}>
+          Live data from Alpha Vantage. For historical comparison, use Macrotrends.net.
+        </p>
+        <div className="ratio-grid">
+          {currentRatios.map((r) => (
+            <div className="ratio-card" key={r.label}>
+              <div className="ratio-name">{r.label}</div>
+              <div className="ratio-current" style={{ color: 'var(--text-primary)' }}>{r.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
 
+      {/* Profitability */}
+      <div className="card">
+        <div className="card-header">Profitability & Scale</div>
+        <div className="ratio-grid">
+          {profitMetrics.map((r) => (
+            <div className="ratio-card" key={r.label}>
+              <div className="ratio-name">{r.label}</div>
+              <div className="ratio-current" style={{ color: 'var(--text-primary)' }}>{r.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Historical EPS */}
+      {annualEarnings.length > 0 && (
+        <div className="card">
+          <div className="card-header">Historical EPS (Annual)</div>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
+            Use this to assess EPS trend — a key Buffett criterion.
+          </p>
           <div style={{ overflowX: 'auto' }}>
-            <table className="peer-table">
+            <table className="data-table">
               <thead>
                 <tr>
-                  <th>Company</th>
-                  <th>P/E</th>
-                  <th>EV/EBITDA</th>
-                  <th>P/FCF</th>
-                  <th>P/S</th>
-                  <th>P/B</th>
+                  <th>Year</th>
+                  {annualEarnings.map((e) => (
+                    <th className="num" key={e.fiscalDateEnding}>{e.fiscalDateEnding?.slice(0, 4)}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                <tr className="highlight">
-                  <td>{ticker}</td>
-                  <td>{formatVal(ttmRatios?.peRatioTTM, 1)}</td>
-                  <td>{formatVal(ttmRatios?.enterpriseValueOverEBITDATTM, 1)}</td>
-                  <td>{formatVal(ttmRatios?.priceToFreeCashFlowsRatioTTM, 1)}</td>
-                  <td>{formatVal(ttmRatios?.priceToSalesRatioTTM, 1)}</td>
-                  <td>{formatVal(ttmRatios?.priceToBookRatioTTM, 1)}</td>
+                <tr>
+                  <td className="label">EPS</td>
+                  {annualEarnings.map((e) => (
+                    <td className="num" key={e.fiscalDateEnding}>
+                      {e.reportedEPS !== 'None' ? '$' + parseFloat(e.reportedEPS).toFixed(2) : '—'}
+                    </td>
+                  ))}
                 </tr>
-                {peers.map((p) => {
-                  const pr = peerRatios[p];
-                  return (
-                    <tr key={p}>
-                      <td>{p}</td>
-                      <td>{formatVal(pr?.peRatioTTM, 1)}</td>
-                      <td>{formatVal(pr?.enterpriseValueOverEBITDATTM, 1)}</td>
-                      <td>{formatVal(pr?.priceToFreeCashFlowsRatioTTM, 1)}</td>
-                      <td>{formatVal(pr?.priceToSalesRatioTTM, 1)}</td>
-                      <td>{formatVal(pr?.priceToBookRatioTTM, 1)}</td>
-                    </tr>
-                  );
-                })}
               </tbody>
             </table>
           </div>
         </div>
       )}
+
+      {/* Manual comparison note */}
+      <div className="card">
+        <div className="card-header">Historical Comparison</div>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.7 }}>
+          For 5-year and 10-year historical P/E, EV/EBITDA, and P/FCF averages, the best free source is{' '}
+          <strong style={{ color: 'var(--accent)' }}>Macrotrends.net</strong> — search the ticker there and
+          you'll see full ratio history going back 10+ years. Compare those averages to the current multiples
+          above to assess whether the stock is cheap or expensive relative to its own history.
+        </p>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.7, marginTop: 12 }}>
+          For peer comparison, <strong style={{ color: 'var(--accent)' }}>Simply Wall St</strong> or{' '}
+          <strong style={{ color: 'var(--accent)' }}>Tikr.com</strong> (free tier) give side-by-side
+          competitor multiples.
+        </p>
+      </div>
     </div>
   );
 }
