@@ -9,42 +9,29 @@ export default async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
 
-  const prompt = `You are a financial analyst using the Warren Buffett / Mary Buffett framework from "Interpreting Financial Statements."
-
-The user has provided financial statement data for ${ticker}. Run the full 22-criteria DCA scorecard.
-
-FINANCIAL DATA PROVIDED:
-${financialData}
-
-INSTRUCTIONS:
-
-Step 1: Extract and organize a raw financials table (5 years, in $M) with: Revenue, Gross profit, Operating income, Net income, D&A, Operating CF, CapEx, LT debt, ST debt, Cash + marketable securities, EPS diluted, Retained earnings, Total assets, Total equity, Shares outstanding, Interest expense. If some data is missing, note it and work with what's available.
-
-Step 2: Score every criterion below. For each, calculate the value for each available year, determine pass/warn/fail, and write a 2-3 sentence explanation specific to this business.
+  const scorecardInstructions = `Run the full 22-criteria DCA scorecard using the Warren Buffett / Mary Buffett framework from "Interpreting Financial Statements."
 
 Return a JSON object with this exact structure:
-
 {
   "company": "Company Name",
   "ticker": "${ticker}",
   "years": [2024, 2023, 2022, 2021, 2020],
   "raw_financials": {
-    "revenue": [num, num, ...],
-    "gross_profit": [num, num, ...],
-    "operating_income": [num, num, ...],
-    "net_income": [num, num, ...],
-    "dna": [num, num, ...],
-    "operating_cf": [num, num, ...],
-    "capex": [num, num, ...],
-    "lt_debt": [num, num, ...],
-    "st_debt": [num, num, ...],
-    "cash": [num, num, ...],
-    "eps": [num, num, ...],
-    "retained_earnings": [num, num, ...],
-    "total_assets": [num, num, ...],
-    "total_equity": [num, num, ...],
-    "shares_outstanding": [num, num, ...],
-    "interest_expense": [num, num, ...]
+    "revenue": [num, num, num, num, num],
+    "gross_profit": [num, num, num, num, num],
+    "operating_income": [num, num, num, num, num],
+    "net_income": [num, num, num, num, num],
+    "dna": [num, num, num, num, num],
+    "operating_cf": [num, num, num, num, num],
+    "capex": [num, num, num, num, num],
+    "lt_debt": [num, num, num, num, num],
+    "st_debt": [num, num, num, num, num],
+    "cash": [num, num, num, num, num],
+    "eps": [num, num, num, num, num],
+    "retained_earnings": [num, num, num, num, num],
+    "total_assets": [num, num, num, num, num],
+    "total_equity": [num, num, num, num, num],
+    "interest_expense": [num, num, num, num, num]
   },
   "criteria": [
     {
@@ -54,7 +41,7 @@ Return a JSON object with this exact structure:
       "values": {"2024": "82.0%", "2023": "80.8%"},
       "threshold": "pass ≥60%, warn ≥40%, fail <40%",
       "result": "pass",
-      "explanation": "Two to three sentences..."
+      "explanation": "2-3 sentences specific to this business."
     }
   ],
   "summary": {
@@ -62,12 +49,12 @@ Return a JSON object with this exact structure:
     "warn_count": 4,
     "fail_count": 5,
     "verdict": "Moderate-Strong DCA signals",
-    "strongest_signal": "Description of strongest signal",
-    "biggest_risk": "Description of biggest risk"
+    "strongest_signal": "Description",
+    "biggest_risk": "Description"
   }
 }
 
-The 22 criteria in order:
+The 22 criteria:
 1. Gross margin % — pass ≥60%, warn ≥40%, fail <40% [INCOME STATEMENT QUALITY]
 2. SG&A as % of gross profit — pass ≤30%, warn ≤60%, fail >60% [INCOME STATEMENT QUALITY]
 3. R&D as % of gross profit — pass ≤10%, warn ≤30%, fail >30% [INCOME STATEMENT QUALITY]
@@ -93,6 +80,28 @@ The 22 criteria in order:
 
 IMPORTANT: Return ONLY the JSON object. No markdown, no code fences, no preamble.`;
 
+  // Build message content based on input type
+  let messageContent;
+
+  if (financialData.type === 'pdf') {
+    messageContent = [
+      {
+        type: 'document',
+        source: {
+          type: 'base64',
+          media_type: 'application/pdf',
+          data: financialData.data,
+        },
+      },
+      {
+        type: 'text',
+        text: `The PDF above contains financial statements for ${ticker}. Extract all financial data from the statements and then:\n\n${scorecardInstructions}`,
+      },
+    ];
+  } else {
+    messageContent = `The following is financial statement data for ${ticker}:\n\n${financialData.data}\n\n${scorecardInstructions}`;
+  }
+
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -100,11 +109,12 @@ IMPORTANT: Return ONLY the JSON object. No markdown, no code fences, no preamble
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'pdfs-2024-09-25',
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
         max_tokens: 8000,
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: 'user', content: messageContent }],
       }),
     });
 
