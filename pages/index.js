@@ -3,6 +3,7 @@ import DCFCalculator from '../components/DCFCalculator';
 import RelativeValuation from '../components/RelativeValuation';
 import DCAScorecard from '../components/DCAScorecard';
 import Qualitative from '../components/Qualitative';
+const PASSWORD = 'dixie';
 
 const TABS = [
   { id: 'qualitative', label: 'Qualitative' },
@@ -12,6 +13,9 @@ const TABS = [
 ];
 
 export default function Home() {
+  const [authenticated, setAuthenticated] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordError, setPasswordError] = useState(false);
   const [ticker, setTicker] = useState('');
   const [activeTicker, setActiveTicker] = useState('');
   const [activeTab, setActiveTab] = useState('qualitative');
@@ -180,6 +184,36 @@ export default function Home() {
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') handleAnalyze();
   };
+
+  const handlePasswordSubmit = () => {
+    if (passwordInput === PASSWORD) {
+      setAuthenticated(true);
+      setPasswordError(false);
+    } else {
+      setPasswordError(true);
+    }
+  };
+
+  if (!authenticated) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-primary)' }}>
+        <div style={{ textAlign: 'center', padding: 40 }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 28, marginBottom: 8, color: 'var(--text-primary)' }}>Investment Analysis</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 40, letterSpacing: 1, textTransform: 'uppercase' }}>Buffett Framework</div>
+          <input
+            type="password"
+            value={passwordInput}
+            onChange={(e) => setPasswordInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handlePasswordSubmit()}
+            placeholder="Password"
+            style={{ background: 'var(--bg-card)', border: passwordError ? '1px solid var(--fail)' : '1px solid var(--border)', borderRadius: 8, padding: '14px 20px', color: 'var(--text-primary)', fontSize: 15, width: 240, outline: 'none', display: 'block', margin: '0 auto 12px', textAlign: 'center' }}
+          />
+          {passwordError && <div style={{ color: 'var(--fail)', fontSize: 13, marginBottom: 12 }}>Incorrect password</div>}
+          <button className="btn-primary" onClick={handlePasswordSubmit} style={{ width: 240 }}>Enter</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-container">
