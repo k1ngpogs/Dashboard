@@ -14,7 +14,7 @@ Extract all financial data from the documents provided and return ONLY a JSON ob
 {
   "company": "Company Name",
   "ticker": "${ticker}",
-  "years": "extract the actual fiscal years from the documents provided, most recent first",
+  "years": "extract the actual fiscal years from the documents, most recent first e.g. [2025, 2024, 2023, 2022, 2021]",
   "raw_financials": {
     "revenue": [num, num, num, num, num],
     "gross_profit": [num, num, num, num, num],
@@ -40,7 +40,7 @@ Extract all financial data from the documents provided and return ONLY a JSON ob
       "values": {"2024": "82.0%", "2023": "80.8%"},
       "threshold": "pass ≥60%, warn ≥40%, fail <40%",
       "result": "pass",
-      "explanation": "2-3 sentences specific to this business."
+      "explanation": "1 sentence specific to this business."
     }
   ],
   "summary": {
@@ -106,7 +106,7 @@ The 22 criteria:
         'anthropic-beta': 'pdfs-2024-09-25',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
+        model: 'claude-haiku-4-5',
         max_tokens: 8000,
         messages: [{ role: 'user', content: messageContent }],
       }),
