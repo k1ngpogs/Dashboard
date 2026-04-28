@@ -14,7 +14,7 @@ Extract all financial data from the documents provided and return ONLY a JSON ob
 {
   "company": "Company Name",
   "ticker": "${ticker}",
-  "years": [2024, 2023, 2022, 2021, 2020],
+  "years": "extract the actual fiscal years from the documents provided, most recent first",
   "raw_financials": {
     "revenue": [num, num, num, num, num],
     "gross_profit": [num, num, num, num, num],
