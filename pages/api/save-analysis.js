@@ -1,4 +1,4 @@
-import { createClient } from '@vercel/kv';
+import { Redis } from '@upstash/redis';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -9,23 +9,24 @@ export default async function handler(req, res) {
   }
 
   try {
-    const kv = createClient({
+    const redis = new Redis({
       url: process.env.KV_REST_API_URL,
       token: process.env.KV_REST_API_TOKEN,
     });
 
     const symbol = ticker.toUpperCase();
-    await kv.set(`analysis:${symbol}:${type}`, JSON.stringify({ data, savedAt: new Date().toISOString() }));
+    await redis.set(`analysis:${symbol}:${type}`, JSON.stringify({ data, savedAt: new Date().toISOString() }));
 
-    const existing = await kv.get('tickers');
+    const existing = await redis.get('tickers');
     const list = existing ? JSON.parse(existing) : [];
     if (!list.includes(symbol)) {
       list.unshift(symbol);
-      await kv.set('tickers', JSON.stringify(list));
+      await redis.set('tickers', JSON.stringify(list));
     }
 
     return res.status(200).json({ success: true });
   } catch (err) {
+    console.error('KV save error:', err);
     return res.status(500).json({ error: err.message });
   }
 }
