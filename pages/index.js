@@ -71,7 +71,7 @@ export default function Home() {
       setTicker(symbol);
       setQualAnalysis(cache[symbol].qualitative);
       setQualSavedAt(cache[symbol].qualSavedAt || null);
-      setDcaScorecard(cache[symbol].dca || null);
+      setDcaScorecard(null); // DCA never auto-loads
       setQualError(null);
       return;
     }
@@ -90,7 +90,7 @@ export default function Home() {
         setTicker(symbol);
         setQualAnalysis(saved.qualitative.data);
         setQualSavedAt(saved.qualitative.savedAt);
-        setDcaScorecard(saved.dca?.data || null);
+        setDcaScorecard(null); // DCA never auto-loads
         setQualError(null);
         return;
       }
